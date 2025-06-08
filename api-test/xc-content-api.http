@@ -51,3 +51,14 @@ Content-Type: application/json
 ### 课程计划查询
 GET {{content_host}}/content/teachplan/117/tree-nodes
 Content-type: application/json
+
+
+### 上传文件
+POST {{media_host}}/media/upload/coursefile
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="filedata"; filename="Snipaste_2025-01-21_10-59-20.png"
+Content-Type: application/octet-stream
+
+< C:/Users/94991/Pictures/Screenshots/Snipaste_2025-01-21_10-59-20.png
