@@ -112,7 +112,13 @@ public class MinioTest {
 //            sources.add(composeSource);
 //        }
 
-        List<ComposeSource> sources = Stream.iterate(0, i -> ++i).limit(5).map(i -> ComposeSource.builder().bucket("testbucket").object("chunk/" + i).build()).collect(Collectors.toList());
+        List<ComposeSource> sources = Stream.iterate(0, i -> ++i)
+                .limit(5)
+                .map(i -> ComposeSource.builder()
+                        .bucket("testbucket")
+                        .object("chunk/" + i)
+                        .build())
+                .collect(Collectors.toList());
 
         // 指定合并后的objectName等信息
         ComposeObjectArgs composeObjectArgs = ComposeObjectArgs.builder()
