@@ -9,10 +9,12 @@ import com.xuecheng.base.model.PageParams;
 import com.xuecheng.base.model.PageResult;
 import com.xuecheng.base.model.RestResponse;
 import com.xuecheng.media.mapper.MediaFilesMapper;
+import com.xuecheng.media.mapper.MediaProcessMapper;
 import com.xuecheng.media.model.dto.QueryMediaParamsDto;
 import com.xuecheng.media.model.dto.UploadFileParamsDto;
 import com.xuecheng.media.model.dto.UploadFileResultDto;
 import com.xuecheng.media.model.po.MediaFiles;
+import com.xuecheng.media.model.po.MediaProcess;
 import com.xuecheng.media.service.MediaFileService;
 import io.minio.*;
 import io.minio.errors.*;
@@ -53,6 +55,9 @@ public class MediaFileServiceImpl implements MediaFileService {
 
     @Autowired
     MediaFileService currentProxy;
+
+    @Autowired
+    MediaProcessMapper mediaProcessMapper;
 
     //存储普通文件
     @Value("${minio.bucket.files}")
@@ -216,11 +221,38 @@ public class MediaFileServiceImpl implements MediaFileService {
                 log.debug("向数据库保存文件失败,bucket:{},objectName:{}", bucket, objectName);
                 return null;
             }
-            return mediaFiles;
+
+            //记录待处理任务
+            addWaitingTask(mediaFiles);
+
+
+            //向media_process插入记录
 
         }
         return mediaFiles;
 
+    }
+
+    /**
+     * 添加待处理任务
+     *
+     * @param mediaFiles 媒资文件信息
+     */
+    private void addWaitingTask(MediaFiles mediaFiles) {
+        //文件名称
+        String filename = mediaFiles.getFilename();
+        //文件扩展名
+        String extension = filename.substring(filename.lastIndexOf("."));
+        //文件mimeType
+        String mimeType = getMimeType(extension);
+        //如果是avi视频添加到视频待处理表
+        if (mimeType.equals("video/x-msvideo")) {
+            MediaProcess mediaProcess = new MediaProcess();
+            BeanUtils.copyProperties(mediaFiles, mediaProcess);
+            mediaProcess.setStatus("1");//未处理
+            mediaProcess.setFailCount(0);//失败次数默认为0
+            mediaProcessMapper.insert(mediaProcess);
+        }
     }
 
     @Override
@@ -300,7 +332,13 @@ public class MediaFileServiceImpl implements MediaFileService {
         //分块文件所在目录
         String chunkFileFolderPath = getChunkFileFolderPath(fileMd5);
         //找到所有的分块文件
-        List<ComposeSource> sources = Stream.iterate(0, i -> ++i).limit(chunkTotal).map(i -> ComposeSource.builder().bucket(bucket_video).object(chunkFileFolderPath + i).build()).collect(Collectors.toList());
+        List<ComposeSource> sources = Stream.iterate(0, i -> ++i)
+                .limit(chunkTotal)
+                .map(i -> ComposeSource
+                        .builder().bucket(bucket_video)
+                        .object(chunkFileFolderPath + i)
+                        .build())
+                .collect(Collectors.toList());
         //源文件名称
         String filename = uploadFileParamsDto.getFilename();
         //扩展名
@@ -308,7 +346,8 @@ public class MediaFileServiceImpl implements MediaFileService {
         //合并后文件的objectname
         String objectName = getFilePathByMd5(fileMd5, extension);
         //指定合并后的objectName等信息
-        ComposeObjectArgs composeObjectArgs = ComposeObjectArgs.builder()
+        ComposeObjectArgs composeObjectArgs = ComposeObjectArgs
+                .builder()
                 .bucket(bucket_video)
                 .object(objectName)//合并后的文件的objectname
                 .sources(sources)//指定源文件
@@ -348,6 +387,7 @@ public class MediaFileServiceImpl implements MediaFileService {
         //==========清理分块文件=========
         clearChunkFiles(chunkFileFolderPath, chunkTotal);
 
+
         return RestResponse.success(true);
     }
 
@@ -358,9 +398,15 @@ public class MediaFileServiceImpl implements MediaFileService {
      * @param chunkTotal          分块文件总数
      */
     private void clearChunkFiles(String chunkFileFolderPath, int chunkTotal) {
-        Iterable<DeleteObject> objects = Stream.iterate(0, i -> ++i).limit(chunkTotal).map(i -> new DeleteObject(chunkFileFolderPath + i)).collect(Collectors.toList());
-        ;
-        RemoveObjectsArgs removeObjectsArgs = RemoveObjectsArgs.builder().bucket(bucket_video).objects(objects).build();
+        Iterable<DeleteObject> objects = Stream.iterate(0, i -> ++i)
+                .limit(chunkTotal)
+                .map(i -> new DeleteObject(chunkFileFolderPath + i))
+                .collect(Collectors.toList());
+        RemoveObjectsArgs removeObjectsArgs = RemoveObjectsArgs
+                .builder()
+                .bucket(bucket_video)
+                .objects(objects)
+                .build();
         Iterable<Result<DeleteError>> results = minioClient.removeObjects(removeObjectsArgs);
         //要想真正删除
         results.forEach(f -> {
@@ -370,7 +416,6 @@ public class MediaFileServiceImpl implements MediaFileService {
                 e.printStackTrace();
             }
         });
-
     }
 
     /**
@@ -416,12 +461,12 @@ public class MediaFileServiceImpl implements MediaFileService {
      * @return
      */
     private String getFilePathByMd5(String fileMd5, String fileExt) {
-        return fileMd5.substring(0, 1) + "/" + fileMd5.substring(1, 2) + "/" + fileMd5 + "/" + fileMd5 + fileExt;
+        return fileMd5.charAt(0) + "/" + fileMd5.charAt(1) + "/" + fileMd5 + "/" + fileMd5 + fileExt;
     }
 
     //得到分块文件的目录
     private String getChunkFileFolderPath(String fileMd5) {
-        return fileMd5.substring(0, 1) + "/" + fileMd5.substring(1, 2) + "/" + fileMd5 + "/" + "chunk" + "/";
+        return fileMd5.charAt(0) + "/" + fileMd5.charAt(1) + "/" + fileMd5 + "/" + "chunk" + "/";
     }
 
 }

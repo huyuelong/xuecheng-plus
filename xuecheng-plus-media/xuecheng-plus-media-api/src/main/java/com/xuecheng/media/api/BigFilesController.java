@@ -43,8 +43,8 @@ public class BigFilesController {
     @ApiOperation(value = "上传分块文件")
     @PostMapping("/upload/uploadchunk")
     public RestResponse<Boolean> uploadchunk(@RequestParam("file") MultipartFile file,
-                                    @RequestParam("fileMd5") String fileMd5,
-                                    @RequestParam("chunk") int chunk) throws Exception {
+                                             @RequestParam("fileMd5") String fileMd5,
+                                             @RequestParam("chunk") int chunk) throws Exception {
         // 创建一个临时文件
         File tempFile = File.createTempFile("minio", ".temp");
         file.transferTo(tempFile); // 把上传的文件写入临时文件
@@ -60,7 +60,7 @@ public class BigFilesController {
                                     @RequestParam("fileName") String fileName,
                                     @RequestParam("chunkTotal") int chunkTotal) throws Exception {
         Long companyId = 1232141425L;
-        // 文件信息对象
+        //文件信息对象
         UploadFileParamsDto uploadFileParamsDto = new UploadFileParamsDto();
         uploadFileParamsDto.setFilename(fileName);
         uploadFileParamsDto.setTags("视频文件");

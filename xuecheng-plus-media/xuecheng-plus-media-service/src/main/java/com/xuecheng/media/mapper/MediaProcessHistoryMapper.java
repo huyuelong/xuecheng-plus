@@ -11,5 +11,4 @@ import com.xuecheng.media.model.po.MediaProcessHistory;
  * @author itcast
  */
 public interface MediaProcessHistoryMapper extends BaseMapper<MediaProcessHistory> {
-
 }
