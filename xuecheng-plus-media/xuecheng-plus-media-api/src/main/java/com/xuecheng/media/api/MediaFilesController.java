@@ -11,10 +11,7 @@ import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
@@ -42,7 +39,8 @@ public class MediaFilesController {
 
     @ApiOperation("上传图片")
     @PostMapping(value = "/upload/coursefile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public UploadFileResultDto upload(@RequestPart("filedata") MultipartFile filedata) throws IOException {
+    public UploadFileResultDto upload(@RequestPart("filedata") MultipartFile filedata,
+                                      @RequestParam(value = "objectName", required = false) String objectName) throws IOException {
 
         // 准备上传文件的信息
         UploadFileParamsDto uploadFileParamsDto = new UploadFileParamsDto();
@@ -63,7 +61,7 @@ public class MediaFilesController {
         String localFilePath = tempFile.getAbsolutePath();
 
         // 调用service上传图片
-        UploadFileResultDto uploadFileResultDto = mediaFileService.uploadFile(companyId, uploadFileParamsDto, localFilePath);
+        UploadFileResultDto uploadFileResultDto = mediaFileService.uploadFile(companyId, uploadFileParamsDto, localFilePath, objectName);
 
         return uploadFileResultDto;
     }
