@@ -41,6 +41,7 @@ Content-Type: application/json
 ### 课程查询
 GET {{content_host}}/content/course/40
 Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsieHVlY2hlbmctcGx1cyJdLCJ1c2VyX25hbWUiOiJ6aGFuZ3NhbiIsInNjb3BlIjpbImFsbCJdLCJleHAiOjE3NTA4NTE1MDUsImF1dGhvcml0aWVzIjpbInAxIl0sImp0aSI6IjhkNDEyYTExLTM1NjktNDllZS05Mzk0LTczODE0ZDliY2U0MyIsImNsaWVudF9pZCI6IlhjV2ViQXBwIn0.WYKNNwGB8MtmxcB8GVx6U4p1zQmg_0V5lFIDi8Jht9g
 
 
 ### 课程修改
@@ -62,3 +63,9 @@ Content-Disposition: form-data; name="filedata"; filename="Snipaste_2025-01-21_1
 Content-Type: application/octet-stream
 
 < C:/Users/94991/Pictures/Screenshots/Snipaste_2025-01-21_10-59-20.png
+
+
+### 通过网关访问课程查询
+GET {{gateway_host}}/content/course/40
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsieHVlY2hlbmctcGx1cyJdLCJ1c2VyX25hbWUiOiJ6aGFuZ3NhbiIsInNjb3BlIjpbImFsbCJdLCJleHAiOjE3NTEwMTg3ODYsImF1dGhvcml0aWVzIjpbInAxIl0sImp0aSI6ImU3OWEyMmVmLTRhNmQtNDYyMy1hOTMyLTViODlmMzRmMGU0MSIsImNsaWVudF9pZCI6IlhjV2ViQXBwIn0.PkqeIkY91My-j5-smQI5pe9C6EhCN4pLNvXWZ4mfTfo
