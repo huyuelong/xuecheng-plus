@@ -31,18 +31,19 @@ public class GlobalExceptionHandler {
         return restErrorResponse;
     }
 
-
     @ResponseBody
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public RestErrorResponse exception(Exception e) {
 
-        //记录异常
-        log.error("系统异常{}", e.getMessage(), e);
+        log.error("【系统异常】{}",e.getMessage(),e);
+        e.printStackTrace();
+        if(e.getMessage().equals("不允许访问")){
+            return new RestErrorResponse("没有操作此功能的权限");
+        }
+        return new RestErrorResponse(CommonError.UNKOWN_ERROR.getErrMessage());
 
-        //解析出异常信息
-        RestErrorResponse restErrorResponse = new RestErrorResponse(CommonError.UNKOWN_ERROR.getErrMessage());
-        return restErrorResponse;
+
     }
 
     // MethodArgumentNotValidException 处理参数校验异常
