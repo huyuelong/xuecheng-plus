@@ -1,21 +1,35 @@
 package com.xuecheng.orders.service.impl;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import com.alipay.api.AlipayApiException;
+import com.alipay.api.AlipayClient;
+import com.alipay.api.DefaultAlipayClient;
+import com.alipay.api.request.AlipayTradeQueryRequest;
+import com.alipay.api.response.AlipayTradeQueryResponse;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.xuecheng.base.exception.XueChengPlusException;
 import com.xuecheng.base.utils.IdWorkerUtils;
 import com.xuecheng.base.utils.QRCodeUtil;
+import com.xuecheng.messagesdk.model.po.MqMessage;
+import com.xuecheng.messagesdk.service.MqMessageService;
+import com.xuecheng.orders.config.AlipayConfig;
+import com.xuecheng.orders.config.PayNotifyConfig;
 import com.xuecheng.orders.mapper.XcOrdersGoodsMapper;
 import com.xuecheng.orders.mapper.XcOrdersMapper;
 import com.xuecheng.orders.mapper.XcPayRecordMapper;
 import com.xuecheng.orders.model.dto.AddOrderDto;
 import com.xuecheng.orders.model.dto.PayRecordDto;
+import com.xuecheng.orders.model.dto.PayStatusDto;
 import com.xuecheng.orders.model.po.XcOrders;
 import com.xuecheng.orders.model.po.XcOrdersGoods;
 import com.xuecheng.orders.model.po.XcPayRecord;
 import com.xuecheng.orders.service.OrderService;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.*;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,8 +37,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -39,8 +56,25 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     private XcPayRecordMapper payRecordMapper;
 
+    @Autowired
+    private OrderServiceImpl currentProxy;
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+
+    @Autowired
+    private MqMessageService mqMessageService;
+
     @Value("${pay.qrcodeurl}")
     String qrcodeurl;
+
+    @Value("${pay.alipay.APP_ID}")
+    String APP_ID;
+    @Value("${pay.alipay.APP_PRIVATE_KEY}")
+    String APP_PRIVATE_KEY;
+
+    @Value("${pay.alipay.ALIPAY_PUBLIC_KEY}")
+    String ALIPAY_PUBLIC_KEY;
 
     @Transactional
     @Override
@@ -77,6 +111,154 @@ public class OrderServiceImpl implements OrderService {
         XcPayRecord xcPayRecord = payRecordMapper.selectOne(new LambdaQueryWrapper<XcPayRecord>().eq(XcPayRecord::getPayNo, payNo));
         return xcPayRecord;
     }
+
+    @Override
+    public PayRecordDto queryPayResult(String payNo) {
+        // 调用支付宝的接口查询支付结果
+        PayStatusDto payStatusDto = queryPayResultFromAlipay(payNo);
+
+        // 拿到支付结果更新支付记录表和订单表的支付状态
+        currentProxy.saveAliPayStatus(payStatusDto);
+        // 要返回最新的支付记录信息
+        XcPayRecord payRecordByPayno = getPayRecordByPayno(payNo);
+        PayRecordDto payRecordDto = new PayRecordDto();
+        BeanUtils.copyProperties(payRecordByPayno, payRecordDto);
+
+        return payRecordDto;
+    }
+
+    /**
+     * 请求支付宝查询支付结果
+     * @param payNo 支付交易号
+     * @return 支付结果
+     */
+    public PayStatusDto queryPayResultFromAlipay(String payNo) {
+        AlipayClient alipayClient = new DefaultAlipayClient(AlipayConfig.URL, APP_ID, APP_PRIVATE_KEY, "json", AlipayConfig.CHARSET, ALIPAY_PUBLIC_KEY, AlipayConfig.SIGNTYPE); //获得初始化的AlipayClient
+        AlipayTradeQueryRequest request = new AlipayTradeQueryRequest();
+        JSONObject bizContent = new JSONObject();
+        bizContent.put("out_trade_no", payNo);
+        //bizContent.put("trade_no", "2014112611001004680073956707");
+        request.setBizContent(bizContent.toString());
+        String body = null;
+        try {
+            AlipayTradeQueryResponse response = alipayClient.execute(request);
+            if(!response.isSuccess()) { // 交易不成功
+                XueChengPlusException.cast("查询支付宝支付结果失败");
+            }
+            body = response.getBody();
+        } catch (AlipayApiException e) {
+            e.printStackTrace();
+            XueChengPlusException.cast("调用支付宝接口查询支付结果出错");
+        }
+        Map bodyMap = JSON.parseObject(body, Map.class);
+        Map alipay_trade_query_response = (Map) bodyMap.get("alipay_trade_query_response");
+
+        // 解析结果
+        String trade_no = (String) alipay_trade_query_response.get("trade_no");
+        String trade_status = (String) alipay_trade_query_response.get("trade_status");
+        String total_amount = (String) alipay_trade_query_response.get("total_amount");
+        PayStatusDto payStatusDto = new PayStatusDto();
+        payStatusDto.setOut_trade_no(payNo);
+        payStatusDto.setTrade_no(trade_no); // 支付宝交易号
+        payStatusDto.setTrade_status(trade_status); // 交易状态
+        payStatusDto.setApp_id(APP_ID);
+        payStatusDto.setTotal_amount(total_amount); // 总金额
+
+        System.out.println(body);
+        return payStatusDto;
+    }
+
+    /**
+     * @description 保存支付宝支付结果
+     * @param payStatusDto  支付结果信息
+     * @return void
+     */
+    @Transactional
+    public void saveAliPayStatus(PayStatusDto payStatusDto) {
+
+        // 支付记录号
+        String payNo = payStatusDto.getOut_trade_no();
+        XcPayRecord payRecordByPayno = getPayRecordByPayno(payNo);
+        if (payRecordByPayno == null) {
+            XueChengPlusException.cast("支付记录不存在");
+        }
+        // 拿到相关联的订单id
+        Long orderId = payRecordByPayno.getOrderId();
+        XcOrders xcOrders = xcOrdersMapper.selectById(orderId);
+        if (xcOrders == null) {
+            XueChengPlusException.cast("订单不存在");
+        }
+        // 支付状态
+        String statusFromDb = payRecordByPayno.getStatus();
+        // 如果数据库支付的状态已经是成功了，不再处理了
+        if ("601002".equals(statusFromDb)) {
+            XueChengPlusException.cast("订单已支付");
+            return;
+        }
+
+        // 如果支付成功
+        String tradeStatus = payStatusDto.getTrade_status();
+        if (tradeStatus.equals("TRADE_SUCCESS")) { // 支付宝返回的信息为支付成功
+            // 更新支付记录表的状态为支付成功
+            payRecordByPayno.setStatus("601002");
+            // 支付宝的订单号
+            payRecordByPayno.setOutPayNo(payStatusDto.getTrade_no());
+            // 第三方支付渠道编号
+            payRecordByPayno.setOutPayChannel("ALIPAY");
+            // 支付成功时间
+            payRecordByPayno.setPaySuccessTime(LocalDateTime.now());
+            payRecordMapper.updateById(payRecordByPayno);
+
+            // 更新订单表的状态为支付成功
+            xcOrders.setStatus("600002");
+            xcOrdersMapper.updateById(xcOrders);
+
+            // 将消息写到数据库
+            MqMessage mqMessage = mqMessageService.addMessage("payresult_notity", xcOrders.getOutBusinessId(), xcOrders.getOrderType(), null);
+            // 发送消息
+            notifyPayResult(mqMessage);
+
+        }
+
+
+    }
+
+    @Override
+    public void notifyPayResult(MqMessage message) {
+
+        // 消息内容
+        String jsonString = JSON.toJSONString(message);
+        // 创建一个持久化消息
+        MessageBuilderSupport<Message> messageObj = MessageBuilder.withBody(jsonString.getBytes(StandardCharsets.UTF_8)).setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+
+        // 消息id
+        Long id = message.getId();
+
+        // 全局消息id
+        CorrelationData correlationData = new CorrelationData(id.toString());
+
+        // 使用correlationData指定回调方法
+        correlationData.getFuture().addCallback(result -> {
+            if (result.isAck()) {
+                // 消息成功发送到了交换机
+                log.debug("消息发送成功:{}", jsonString);
+                // 将消息从数据库表mq_message删除;
+                mqMessageService.completed(id);
+
+            } else {
+                // 消息发送失败
+                log.debug("消息发送失败:{}", jsonString);
+
+            }
+        }, ex -> {
+            // 发生异常了
+            log.debug("消息发送异常:{}", jsonString);
+        });
+        // 发送消息
+        rabbitTemplate.convertAndSend(PayNotifyConfig.PAYNOTIFY_EXCHANGE_FANOUT, "", messageObj, correlationData);
+
+    }
+
 
     /**
      * 保存订单记录

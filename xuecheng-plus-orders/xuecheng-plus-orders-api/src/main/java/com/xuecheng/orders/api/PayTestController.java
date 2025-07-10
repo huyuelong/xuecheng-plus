@@ -53,7 +53,7 @@ public class PayTestController {
         httpResponse.getWriter().flush();
     }
 
-    @PostMapping("/paynotify")
+    @PostMapping("/paynotifytest")
     public void paynotify(HttpServletRequest request,HttpServletResponse response) throws IOException, AlipayApiException {
         Map<String,String> params = new HashMap<String,String>();
         Map requestParams = request.getParameterMap();

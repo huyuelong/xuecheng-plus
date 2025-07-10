@@ -3,11 +3,13 @@ package com.xuecheng.orders.api;
 import com.alipay.api.AlipayApiException;
 import com.alipay.api.AlipayClient;
 import com.alipay.api.DefaultAlipayClient;
+import com.alipay.api.internal.util.AlipaySignature;
 import com.alipay.api.request.AlipayTradeWapPayRequest;
 import com.xuecheng.base.exception.XueChengPlusException;
 import com.xuecheng.orders.config.AlipayConfig;
 import com.xuecheng.orders.model.dto.AddOrderDto;
 import com.xuecheng.orders.model.dto.PayRecordDto;
+import com.xuecheng.orders.model.dto.PayStatusDto;
 import com.xuecheng.orders.model.po.XcPayRecord;
 import com.xuecheng.orders.service.OrderService;
 import com.xuecheng.orders.util.SecurityUtil;
@@ -22,8 +24,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
  * 订单相关的接口
@@ -79,9 +86,9 @@ public class OrderController {
 //        alipayRequest.setNotifyUrl("http://domain.com/CallBack/notify_url.jsp");//在公共参数中设置回跳和通知地址
 //        alipayRequest.setNotifyUrl("http://tjxt-user-t.itheima.net/xuecheng/orders/paynotify");//在公共参数中设置回跳和通知地址
         alipayRequest.setBizContent("{" +
-                " \"out_trade_no\":\""+payNo+"\"," +
-                " \"total_amount\":\""+payRecordByPayno.getTotalPrice()+"\"," +
-                " \"subject\":\""+payRecordByPayno.getOrderName()+"\"," +
+                " \"out_trade_no\":\"" + payNo + "\"," +
+                " \"total_amount\":\"" + payRecordByPayno.getTotalPrice() + "\"," +
+                " \"subject\":\"" + payRecordByPayno.getOrderName() + "\"," +
                 " \"product_code\":\"QUICK_WAP_PAY\"" +
                 " }");//填充业务参数
         String form = alipayClient.pageExecute(alipayRequest).getBody(); //调用SDK生成表单
@@ -89,5 +96,69 @@ public class OrderController {
         httpResponse.getWriter().write(form);//直接将完整的表单html输出到页面
         httpResponse.getWriter().flush();
     }
+
+    @ApiOperation("查询支付结果")
+    @GetMapping("/payresult")
+    @ResponseBody
+    public PayRecordDto payresult(String payNo) throws IOException {
+
+        //查询支付结果
+        PayRecordDto payRecordDto = orderService.queryPayResult(payNo);
+        return payRecordDto;
+    }
+
+    @ApiOperation("接收支付结果通知")
+    @PostMapping("/receivenotify")
+    public void receivenotify(HttpServletRequest request, HttpServletResponse response) throws IOException, AlipayApiException {
+        Map<String, String> params = new HashMap<String, String>();
+        Map requestParams = request.getParameterMap();
+        for (Iterator iter = requestParams.keySet().iterator(); iter.hasNext(); ) {
+            String name = (String) iter.next();
+            String[] values = (String[]) requestParams.get(name);
+            String valueStr = "";
+            for (int i = 0; i < values.length; i++) {
+                valueStr = (i == values.length - 1) ? valueStr + values[i]
+                        : valueStr + values[i] + ",";
+            }
+            params.put(name, valueStr);
+        }
+
+        //验签
+        boolean verify_result = AlipaySignature.rsaCheckV1(params, ALIPAY_PUBLIC_KEY, AlipayConfig.CHARSET, "RSA2");
+
+        if (verify_result) {//验证成功
+
+            //商户订单号
+            String out_trade_no = new String(request.getParameter("out_trade_no").getBytes("ISO-8859-1"), "UTF-8");
+            //支付宝交易号
+            String trade_no = new String(request.getParameter("trade_no").getBytes("ISO-8859-1"), "UTF-8");
+            //交易状态
+            String trade_status = new String(request.getParameter("trade_status").getBytes("ISO-8859-1"), "UTF-8");
+            //appid
+            String app_id = new String(request.getParameter("app_id").getBytes("ISO-8859-1"), "UTF-8");
+            //total_amount
+            String total_amount = new String(request.getParameter("total_amount").getBytes("ISO-8859-1"), "UTF-8");
+
+            //交易成功处理
+            if (trade_status.equals("TRADE_SUCCESS")) {
+
+                // 更新支付记录表的支付状态为成功，订单表的状态为成功
+                PayStatusDto payStatusDto = new PayStatusDto();
+                payStatusDto.setOut_trade_no(out_trade_no);
+                payStatusDto.setTrade_no(trade_no);
+                payStatusDto.setTrade_status(trade_status);
+                payStatusDto.setApp_id(app_id);
+                payStatusDto.setTotal_amount(total_amount);
+
+                orderService.saveAliPayStatus(payStatusDto);
+
+            }
+
+            response.getWriter().write("success");
+        } else {
+            response.getWriter().write("fail");
+         }
+    }
+
 
 }
